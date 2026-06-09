@@ -16,6 +16,8 @@
 
 package androidx.compose.ui.interaction
 
+import androidx.compose.foundation.ComposeFoundationFlags
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,21 +31,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.UIKitInstrumentedTest
+import androidx.compose.ui.test.assertVisibleInContainer
+import androidx.compose.ui.test.findFocusedUITextInput
+import androidx.compose.ui.test.findNodeWithLabel
 import androidx.compose.ui.test.findNodeWithTag
 import androidx.compose.ui.test.findNodeWithTagOrNull
+import androidx.compose.ui.test.firstNodeOrNull
 import androidx.compose.ui.test.runUIKitInstrumentedTest
 import androidx.compose.ui.test.utils.findFirstDescendant
 import androidx.compose.ui.test.utils.hold
 import androidx.compose.ui.test.utils.isLoupeView
 import androidx.compose.ui.test.utils.up
+import androidx.compose.ui.test.waitForContextMenu
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import org.jetbrains.skiko.OS
+import org.jetbrains.skiko.OSVersion
+import org.jetbrains.skiko.available
+import platform.UIKit.UIPasteboard
 
 class SelectionContainerInteractionTest {
 
@@ -335,6 +347,74 @@ class SelectionContainerInteractionTest {
         assertEquals(SingleTextExpectedSelection, selectionState.selectedText())
     }
 
+    @Test
+    fun testSelectionContainer_CopyCopiesExactSelectedText() =
+        runSelectionContainerContextMenuTest {
+            UIPasteboard.generalPasteboard().string = ClipboardInitialText
+            val selectionState = SelectionState()
+
+            setSelectionContainerContent(state = selectionState, text = CopyMenuText)
+
+            awaitNodeLaidOut(Tag)
+            openToolbarForLeadingWord(Tag)
+            waitUntil("SelectionContainer should create the expected word selection before Copy") {
+                selectionState.selectedText() == CopyMenuFirstWord
+            }
+            findNodeWithLabel("Copy").assertVisibleInContainer()
+            tapContextMenuButton("Copy")
+
+            waitUntil("Pasteboard should contain the copied SelectionContainer text") {
+                UIPasteboard.generalPasteboard().string == CopyMenuFirstWord
+            }
+
+            assertEquals(CopyMenuFirstWord, UIPasteboard.generalPasteboard().string)
+            val selectionAfterCopy = selectionState.selectedText()
+            assertTrue(
+                selectionAfterCopy.isEmpty() || selectionAfterCopy == CopyMenuFirstWord,
+                "Expected SelectionContainer selection to either clear or preserve the copied word after Copy, but was: $selectionAfterCopy",
+            )
+        }
+
+    @Test
+    fun testSelectionContainer_EmptyTextDoesNotOpenMenu() = runSelectionContainerContextMenuTest {
+        val selectionState = SelectionState()
+
+        setSelectionContainerContent(state = selectionState, text = "")
+
+        awaitNodeLaidOut(Tag)
+        findNodeWithTag(Tag).longPress()
+        waitForIdle()
+        delay(500)
+
+        assertTrue(
+            selectionState.selectedTexts.isEmpty(),
+            "Expected empty text content to produce no selection.",
+        )
+        assertEquals("", selectionState.selectedText())
+        assertNoContextMenu()
+    }
+
+    @Test
+    fun testSelectionContainer_OpeningMenuDoesNotShowKeyboard() =
+        runSelectionContainerContextMenuTest {
+            val selectionState = SelectionState()
+
+            setSelectionContainerContent(state = selectionState, text = CopyMenuText)
+
+            awaitNodeLaidOut(Tag)
+            openToolbar(Tag)
+            waitUntil("SelectionContainer should create a selection before menu open") {
+                selectionState.selectedTexts.isNotEmpty()
+            }
+
+            findNodeWithLabel("Copy").assertVisibleInContainer()
+            assertNull(
+                findFocusedUITextInput(),
+                "Expected SelectionContainer menu to open without focusing a UITextInput.",
+            )
+            assertEquals(0.dp, keyboardHeight)
+        }
+
     private fun UIKitInstrumentedTest.setSelectionContainerContent(
         state: SelectionState,
         content: @Composable () -> Unit,
@@ -375,6 +455,35 @@ class SelectionContainerInteractionTest {
         }
     }
 
+    private fun UIKitInstrumentedTest.openToolbarForLeadingWord(tag: String) {
+        findNodeWithTag(tag).tap()
+        delay(400)
+        val tapPoint = pointInNode(tag, xFraction = 0.1f, yFraction = 0.5f)
+        tap(tapPoint)
+        delay(50)
+        tap(tapPoint)
+        waitForContextMenu()
+    }
+
+    private fun UIKitInstrumentedTest.openToolbar(tag: String) {
+        findNodeWithTag(tag).tap()
+        delay(500)
+        findNodeWithTag(tag).doubleTap()
+        waitForContextMenu()
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    private fun runSelectionContainerContextMenuTest(testBlock: UIKitInstrumentedTest.() -> Unit) =
+        runUIKitInstrumentedTest(params = listOf(false, true)) { newContextMenuEnabled ->
+            val previousValue = ComposeFoundationFlags.isNewContextMenuEnabled
+            ComposeFoundationFlags.isNewContextMenuEnabled = newContextMenuEnabled
+            try {
+                testBlock()
+            } finally {
+                ComposeFoundationFlags.isNewContextMenuEnabled = previousValue
+            }
+        }
+
     private fun UIKitInstrumentedTest.longPressAndDrag(
         startTag: String,
         endTag: String,
@@ -408,6 +517,23 @@ class SelectionContainerInteractionTest {
         )
     }
 
+    private fun UIKitInstrumentedTest.tapContextMenuButton(label: String) {
+        if (available(OS.Ios to OSVersion(16))) {
+            findNodeWithLabel(label).tap()
+        } else {
+            findNodeWithLabel(label).touchDown(useNodeWindow = true).hold().also { delay(100) }.up()
+        }
+    }
+
+    private fun UIKitInstrumentedTest.assertNoContextMenu() {
+        assertNull(
+            firstNodeOrNull { node ->
+                node.element?.let { it::class.simpleName } == contextMenuHostClassName
+            },
+            "Expected no SelectionContainer context menu host to be present.",
+        )
+    }
+
     private fun SelectionState.selectedText(): String =
         selectedTexts.joinToString(separator = "") { it.text }
 
@@ -432,9 +558,18 @@ class SelectionContainerInteractionTest {
         private const val StateCrossTextExpectedSecondFragment = "Wor"
         private const val StateCrossTextExpectedText =
             StateCrossTextExpectedFirstFragment + StateCrossTextExpectedSecondFragment
+        private const val ClipboardInitialText = "Clipboard sentinel"
+        private const val CopyMenuFirstWord = "copyable"
+        private const val CopyMenuText = "$CopyMenuFirstWord second"
         private const val SingleTextRangeStart = 2
         private const val SingleTextRangeEnd = 9
         private const val SingleTextExpectedSelection = "complis"
         private val SelectableTextWidth = 160.dp
+        private val contextMenuHostClassName =
+            if (available(OS.Ios to OSVersion(16))) {
+                "_UIEditMenuContainerView"
+            } else {
+                "UICalloutBar"
+            }
     }
 }
