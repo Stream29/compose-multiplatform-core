@@ -30,11 +30,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.UIKitInstrumentedTest
 import androidx.compose.ui.test.findNodeWithTag
+import androidx.compose.ui.test.findNodeWithTagOrNull
 import androidx.compose.ui.test.runUIKitInstrumentedTest
 import androidx.compose.ui.test.utils.findFirstDescendant
 import androidx.compose.ui.test.utils.hold
 import androidx.compose.ui.test.utils.isLoupeView
 import androidx.compose.ui.test.utils.up
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -210,6 +212,129 @@ class SelectionContainerInteractionTest {
             )
         }
 
+    @Test
+    fun testSelectionContainer_SelectedTextsReflectMultiTextSelection() = runUIKitInstrumentedTest {
+        val selectionState = SelectionState()
+
+        setSelectionContainerContent(state = selectionState) {
+            Column {
+                BasicText(
+                    text = StateFirstText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(FirstTextTag),
+                )
+                BasicText(
+                    text = StateSecondText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(SecondTextTag),
+                )
+            }
+        }
+
+        awaitNodeLaidOut(Tag)
+
+        selectionState.select(TextRange(StateCrossTextRangeStart, StateCrossTextRangeEnd))
+
+        waitUntil("SelectionState.selectedTexts should expose selected fragments in visual order") {
+            selectionState.selectedTexts.map { it.text } ==
+                listOf(StateCrossTextExpectedFirstFragment, StateCrossTextExpectedSecondFragment)
+        }
+
+        assertEquals(
+            listOf(StateCrossTextExpectedFirstFragment, StateCrossTextExpectedSecondFragment),
+            selectionState.selectedTexts.map { it.text },
+        )
+        assertEquals(StateCrossTextExpectedText, selectionState.selectedText())
+    }
+
+    @Test
+    fun testSelectionContainer_SelectAllSelectsEntireContainer() = runUIKitInstrumentedTest {
+        val selectionState = SelectionState()
+
+        setSelectionContainerContent(state = selectionState) {
+            Column {
+                BasicText(
+                    text = StateFirstText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(FirstTextTag),
+                )
+                BasicText(
+                    text = StateSecondText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(SecondTextTag),
+                )
+            }
+        }
+
+        awaitNodeLaidOut(Tag)
+
+        selectionState.selectAll()
+
+        waitUntil("SelectionContainer should select all selectable content after selectAll()") {
+            selectionState.selectedTexts.map { it.text } == listOf(StateFirstText, StateSecondText)
+        }
+
+        assertEquals(
+            listOf(StateFirstText, StateSecondText),
+            selectionState.selectedTexts.map { it.text },
+        )
+        assertEquals(StateCombinedText, selectionState.selectedText())
+    }
+
+    @Test
+    fun testSelectionContainer_ClearClearsSelection() = runUIKitInstrumentedTest {
+        val selectionState = SelectionState()
+
+        setSelectionContainerContent(state = selectionState) {
+            Column {
+                BasicText(
+                    text = StateFirstText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(FirstTextTag),
+                )
+                BasicText(
+                    text = StateSecondText,
+                    modifier = Modifier.width(SelectableTextWidth).testTag(SecondTextTag),
+                )
+            }
+        }
+
+        awaitNodeLaidOut(Tag)
+
+        selectionState.selectAll()
+        waitUntil("SelectionContainer should have an active selection before clear()") {
+            selectionState.selectedTexts.isNotEmpty()
+        }
+
+        selectionState.clear()
+
+        waitUntil("SelectionContainer should clear the selection after clear()") {
+            selectionState.selectedTexts.isEmpty()
+        }
+
+        assertTrue(
+            selectionState.selectedTexts.isEmpty(),
+            "Expected selectedTexts to be empty after clear().",
+        )
+        assertEquals("", selectionState.selectedText())
+    }
+
+    @Test
+    fun testSelectionContainer_SelectRangeSelectsExpectedText() = runUIKitInstrumentedTest {
+        val selectionState = SelectionState()
+
+        setSelectionContainerContent(state = selectionState, text = SingleWord)
+
+        awaitNodeLaidOut(Tag)
+
+        selectionState.select(TextRange(SingleTextRangeStart, SingleTextRangeEnd))
+
+        waitUntil("SelectionContainer should select the requested range after select(range)") {
+            selectionState.selectedText() == SingleTextExpectedSelection
+        }
+
+        assertEquals(
+            listOf(SingleTextExpectedSelection),
+            selectionState.selectedTexts.map { it.text },
+        )
+        assertEquals(SingleTextExpectedSelection, selectionState.selectedText())
+    }
+
     private fun UIKitInstrumentedTest.setSelectionContainerContent(
         state: SelectionState,
         content: @Composable () -> Unit,
@@ -242,6 +367,12 @@ class SelectionContainerInteractionTest {
             findFirstDescendant { it.isLoupeView } != null
         }
         touch.up()
+    }
+
+    private fun UIKitInstrumentedTest.awaitNodeLaidOut(tag: String) {
+        waitUntil("Node with tag $tag should be laid out") {
+            findNodeWithTagOrNull(tag)?.frame != null
+        }
     }
 
     private fun UIKitInstrumentedTest.longPressAndDrag(
@@ -292,6 +423,18 @@ class SelectionContainerInteractionTest {
         private const val SecondChildText = "magnificent"
         private const val DisabledChildText = "hidden"
         private const val ThirdChildText = "remarkable"
+        private const val StateFirstText = "Hello "
+        private const val StateSecondText = "World"
+        private const val StateCombinedText = StateFirstText + StateSecondText
+        private const val StateCrossTextRangeStart = 2
+        private const val StateCrossTextRangeEnd = 9
+        private const val StateCrossTextExpectedFirstFragment = "llo "
+        private const val StateCrossTextExpectedSecondFragment = "Wor"
+        private const val StateCrossTextExpectedText =
+            StateCrossTextExpectedFirstFragment + StateCrossTextExpectedSecondFragment
+        private const val SingleTextRangeStart = 2
+        private const val SingleTextRangeEnd = 9
+        private const val SingleTextExpectedSelection = "complis"
         private val SelectableTextWidth = 160.dp
     }
 }
