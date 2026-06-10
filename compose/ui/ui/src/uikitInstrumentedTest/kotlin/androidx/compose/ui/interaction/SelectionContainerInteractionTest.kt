@@ -84,9 +84,7 @@ class SelectionContainerInteractionTest {
 
         setSelectionContainerContent(state = selectionState, text = SingleWord)
 
-        findNodeWithTag(Tag).tap()
-        delay(500)
-        findNodeWithTag(Tag).doubleTap()
+        focusThenDoubleTap()
         waitUntil("SelectionContainer should select the word after double tap") {
             selectionState.selectedText() == SingleWord
         }
@@ -384,7 +382,7 @@ class SelectionContainerInteractionTest {
         awaitNodeLaidOut(Tag)
         findNodeWithTag(Tag).longPress()
         waitForIdle()
-        delay(500)
+        delay(EmptyTextLongPressSettleDelayMillis)
 
         assertTrue(
             selectionState.selectedTexts.isEmpty(),
@@ -402,7 +400,8 @@ class SelectionContainerInteractionTest {
             setSelectionContainerContent(state = selectionState, text = CopyMenuText)
 
             awaitNodeLaidOut(Tag)
-            openToolbar(Tag)
+            focusThenDoubleTap()
+            waitForContextMenu()
             waitUntil("SelectionContainer should create a selection before menu open") {
                 selectionState.selectedTexts.isNotEmpty()
             }
@@ -457,19 +456,19 @@ class SelectionContainerInteractionTest {
 
     private fun UIKitInstrumentedTest.openToolbarForLeadingWord(tag: String) {
         findNodeWithTag(tag).tap()
-        delay(400)
+        delay(DoubleTapPreparationDelayMillis)
         val tapPoint = pointInNode(tag, xFraction = 0.1f, yFraction = 0.5f)
         tap(tapPoint)
-        delay(50)
+        delay(ManualDoubleTapIntervalDelayMillis)
         tap(tapPoint)
         waitForContextMenu()
     }
 
-    private fun UIKitInstrumentedTest.openToolbar(tag: String) {
-        findNodeWithTag(tag).tap()
-        delay(500)
-        findNodeWithTag(tag).doubleTap()
-        waitForContextMenu()
+    private fun UIKitInstrumentedTest.focusThenDoubleTap() {
+        val node = findNodeWithTag(Tag)
+        node.tap()
+        delay(DoubleTapPreparationDelayMillis)
+        node.doubleTap()
     }
 
     @OptIn(ExperimentalFoundationApi::class)
@@ -500,7 +499,7 @@ class SelectionContainerInteractionTest {
             findFirstDescendant { it.isLoupeView } != null
         }
         touch.hold()
-        delay(100)
+        delay(LongPressDragSettleDelayMillis)
         touch.dragTo(x = endPoint.x, y = endPoint.y, duration = 0.3.seconds)
         touch.up()
     }
@@ -521,7 +520,11 @@ class SelectionContainerInteractionTest {
         if (available(OS.Ios to OSVersion(16))) {
             findNodeWithLabel(label).tap()
         } else {
-            findNodeWithLabel(label).touchDown(useNodeWindow = true).hold().also { delay(100) }.up()
+            findNodeWithLabel(label)
+                .touchDown(useNodeWindow = true)
+                .hold()
+                .also { delay(LegacyContextMenuButtonHoldDelayMillis) }
+                .up()
         }
     }
 
@@ -564,6 +567,16 @@ class SelectionContainerInteractionTest {
         private const val SingleTextRangeStart = 2
         private const val SingleTextRangeEnd = 9
         private const val SingleTextExpectedSelection = "complis"
+        // Gives the first tap time to settle so the next doubleTap() is treated as a new gesture.
+        private const val DoubleTapPreparationDelayMillis = 500L
+        // Lets us observe that long-pressing empty text does not create a late menu or selection.
+        private const val EmptyTextLongPressSettleDelayMillis = 500L
+        // Keeps the two manual taps close enough for UIKit to recognize them as a double tap.
+        private const val ManualDoubleTapIntervalDelayMillis = 50L
+        // Gives long-press state a brief moment to settle before starting a drag extension.
+        private const val LongPressDragSettleDelayMillis = 100L
+        // On iOS < 16, hold the menu item briefly so the separate-window press is registered.
+        private const val LegacyContextMenuButtonHoldDelayMillis = 100L
         private val SelectableTextWidth = 160.dp
         private val contextMenuHostClassName =
             if (available(OS.Ios to OSVersion(16))) {
