@@ -1,0 +1,3 @@
+# Preserve the reviewed unified diff and the upstream license byte-for-byte.
+semantics.patch -whitespace
+LICENSE.txt -whitespace
