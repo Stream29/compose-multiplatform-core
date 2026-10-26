@@ -51,6 +51,11 @@ publishing {
     }
 }
 
+tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
 check(libs.versions.compose.multiplatform.get() == "1.11.1") {
     "Review the Compose UI source pin, build dependencies and compatibility patch before upgrading."
 }
