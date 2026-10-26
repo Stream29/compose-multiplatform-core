@@ -4,7 +4,7 @@ pluginManagement {
 
 val forkVersion = providers.gradleProperty("forkVersion").get()
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
         exclusiveContent {
             forRepository { maven { url = uri("../build/verified-maven") } }
