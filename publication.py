@@ -37,7 +37,9 @@ def prepare(root, version):
     source = root / "build/fork-staging" / base
     destination = root / "build/verified-maven" / base
     stem = f"{MODULE}-{version}"
-    names = {f"{stem}.{suffix}" for suffix in ("pom", "module", "klib")} | {f"{stem}-sources.jar"}
+    names = {f"{stem}.{suffix}" for suffix in ("pom", "module", "klib")} | {
+        f"{stem}-sources.jar", f"{stem}-kotlin_resources.kotlin_resources.zip",
+    }
     require({p.name for p in source.iterdir() if p.is_file() and
              not p.name.endswith((".md5", ".sha1", ".sha256", ".sha512", ".xml"))} == names,
             "Unexpected publication payload")
@@ -61,12 +63,16 @@ def prepare(root, version):
         require(attrs["org.jetbrains.kotlin.platform.type"] == "wasm" and
                 attrs["org.jetbrains.kotlin.wasm.target"] == "js", "Unexpected platform")
         usage = attrs["org.gradle.usage"]
-        require(usage in ("kotlin-api", "kotlin-runtime"), "Unexpected usage")
-        roles.add(usage)
+        require(usage in ("kotlin-api", "kotlin-runtime", "kotlin-multiplatformresourcesjs"),
+                "Unexpected usage")
+        if attrs["org.gradle.category"] == "library" and usage in ("kotlin-api", "kotlin-runtime"):
+            roles.add(usage)
         for item in variant["files"]:
-            name = item["name"]
-            require(name in names and item["url"] == name, "Unexpected artifact reference")
-            data = payload[name]
+            url = item["url"]
+            require(url in names and item["name"] in {
+                url, f"ui-{version}.kotlin_resources.zip",
+            }, "Unexpected artifact reference")
+            data = payload[url]
             require(item["size"] == len(data), "Artifact size mismatch")
             for algorithm in ("md5", "sha1", "sha256", "sha512"):
                 if algorithm in item:

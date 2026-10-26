@@ -150,7 +150,8 @@ val prepareComposeUi = tasks.register<PrepareComposeUi>("prepareComposeUi") {
     destination.set(layout.buildDirectory.dir("generated/upstream"))
 }
 
-tasks.withType<Jar>().matching { it.name == "wasmJsSourcesJar" }.configureEach {
+tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>()
+    .matching { it.name == "wasmJsSourcesJar" }.configureEach {
     from("LICENSE.txt") { into("META-INF/androidx/compose/ui/ui") }
     from("README.md") {
         into("META-INF/androidx/compose/ui/ui")
