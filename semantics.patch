@@ -1,0 +1,148 @@
+--- upstream/ComposeWebSemanticsListener.kt
++++ patched/ComposeWebSemanticsListener.kt
+@@ -26,6 +26,7 @@
+ import androidx.compose.ui.semantics.SemanticsNode
+ import androidx.compose.ui.semantics.SemanticsOwner
+ import androidx.compose.ui.semantics.SemanticsProperties
++import androidx.compose.ui.state.ToggleableState
+ import androidx.compose.ui.util.fastForEach
+ import androidx.compose.ui.util.fastJoinToString
+ import kotlin.js.js
+@@ -122,15 +123,23 @@
+         }
+     }
+ 
++    // Kodex compatibility: restore popup owners and mirror current actions, roles and states.
++    private val semanticsOwners = mutableListOf<SemanticsOwner>()
+     private var semanticsOwner: SemanticsOwner? = null
++    private var mirroredOwner: SemanticsOwner? = null
+ 
+     override fun onSemanticsOwnerAppended(semanticsOwner: SemanticsOwner) {
++        semanticsOwners.removeAll { it === semanticsOwner }
++        semanticsOwners.add(semanticsOwner)
+         this.semanticsOwner = semanticsOwner
++        invalidationChannel.trySend(Unit)
+     }
+ 
+     override fun onSemanticsOwnerRemoved(semanticsOwner: SemanticsOwner) {
+-        if (semanticsOwner == this.semanticsOwner) {
+-            this.semanticsOwner = null
++        semanticsOwners.removeAll { it === semanticsOwner }
++        if (semanticsOwner === this.semanticsOwner) {
++            this.semanticsOwner = semanticsOwners.lastOrNull()
++            invalidationChannel.trySend(Unit)
+         }
+     }
+ 
+@@ -154,7 +163,17 @@
+     private fun syncSemanticsWithWebA11Y() {
+         fun SemanticsNode.isValid() = layoutNode.let { it.isPlaced && it.isAttached }
+ 
+-        val root = semanticsOwner?.rootSemanticsNode ?: return
++        val owner = semanticsOwner
++        if (owner == null) {
++            mirroredOwner = null
++            webNodes.forEachValue { it.remove() }
++            webNodes.clear()
++            nodes.clear()
++            nodeToParent.clear()
++            dfsDeque.clear()
++            return
++        }
++        val root = owner.rootSemanticsNode
+ 
+         if (root.isValid()) {
+             dfsDeque.addLast(root)
+@@ -223,6 +242,7 @@
+             nodes.remove(it)
+             nodeToParent.remove(it)
+         }
++        mirroredOwner = owner
+     }
+ 
+     private fun syncNode(
+@@ -232,6 +252,7 @@
+         justCreated: Boolean = false,
+     ) {
+         val config = sn.config
++        val ariaRole = config.getRoleId()
+ 
+         if (config.contains(SemanticsProperties.Text)) {
+             val text = config[SemanticsProperties.Text]
+@@ -243,13 +264,53 @@
+             htmlNode.setAttribute("aria-label", contentDescription.fastJoinToString(", "))
+         }
+ 
+-        if (config.contains(SemanticsActions.OnClick) && justCreated) {
+-            val listener = config[SemanticsActions.OnClick].action!!
+-
+-            // TODO: need to remove the click listener when the new config version doesn't have OnClick action
++        if (justCreated) {
++            val nodeId = sn.id
+             htmlNode.addEventListener("click", {
+-                listener.invoke()
++                // Resolve current semantics, not an action captured before recomposition.
++                if (mirroredOwner != null && mirroredOwner === semanticsOwner) {
++                    nodes[nodeId]?.let { current ->
++                        if (current.layoutNode.isPlaced && current.layoutNode.isAttached &&
++                            current.layoutNode.semanticsId == nodeId &&
++                            current.layoutNode.semanticsConfiguration != null
++                        ) {
++                            val currentConfig = SemanticsNode(current.layoutNode, mergingEnabled = true).config
++                            if (!currentConfig.contains(SemanticsProperties.Disabled) &&
++                                currentConfig.contains(SemanticsActions.OnClick)
++                            ) {
++                                currentConfig[SemanticsActions.OnClick].action?.invoke()
++                            }
++                        }
++                    }
++                }
+             })
++        }
++        if (config.contains(SemanticsProperties.Disabled)) {
++            htmlNode.setAttribute("aria-disabled", "true")
++        } else {
++            htmlNode.removeAttribute("aria-disabled")
++        }
++        val checked = when (ariaRole) {
++            AriaRoleId.Checkbox, AriaRoleId.Switch ->
++                if (config.contains(SemanticsProperties.ToggleableState)) {
++                    when (config[SemanticsProperties.ToggleableState]) {
++                        ToggleableState.On -> "true"
++                        ToggleableState.Off -> "false"
++                        ToggleableState.Indeterminate ->
++                            if (ariaRole == AriaRoleId.Checkbox) "mixed" else "false"
++                    }
++                } else null
++            AriaRoleId.RadioButton -> if (config.contains(SemanticsProperties.Selected)) {
++                config[SemanticsProperties.Selected].toString()
++            } else null
++            else -> null
++        }
++        if (checked == null) htmlNode.removeAttribute("aria-checked")
++        else htmlNode.setAttribute("aria-checked", checked)
++        if (ariaRole == AriaRoleId.Tab && config.contains(SemanticsProperties.Selected)) {
++            htmlNode.setAttribute("aria-selected", config[SemanticsProperties.Selected].toString())
++        } else {
++            htmlNode.removeAttribute("aria-selected")
+         }
+ 
+         if (config.contains(SemanticsProperties.TestTag)) {
+@@ -269,7 +330,7 @@
+             }
+         }
+ 
+-        setA11YAriaRole(element = htmlNode, config.getRoleId())
++        setA11YAriaRole(element = htmlNode, ariaRole)
+ 
+         val density = sn.layoutNode.density
+         sn.boundsInRoot.let { rect ->
+@@ -340,7 +401,7 @@
+         roleId = this[SemanticsProperties.Role].toIntId()
+     }
+ 
+-    if (this.contains(SemanticsActions.OnClick)) {
++    if (!this.contains(SemanticsProperties.Role) && this.contains(SemanticsActions.OnClick)) {
+         // TODO: Not everything with OnClick is a button!!!
+         roleId = Role.Button.toIntId()
+     }

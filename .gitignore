@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+build/
+kotlin-js-store/
+node_modules/
+binary-probe/.gradle/
+binary-probe/.kotlin/
+binary-probe/build/
+binary-probe/kotlin-js-store/
+binary-probe/node_modules/
